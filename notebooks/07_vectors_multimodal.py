@@ -374,6 +374,25 @@ and the lifecycle is enforced by the table itself.
 """)
 
 # %% [markdown]
+# ## 6. Trả lời câu hỏi & Giải thích kết quả (Challenge 3.7)
+#
+# ### 1. Tiết kiệm dung lượng đánh đổi chất lượng tìm kiếm ra sao?
+# - **Đánh đổi về dung lượng**: Lượng tử hóa vector từ `float32` (32 bit / 4 bytes mỗi chiều) xuống `int8` (8 bit / 1 byte mỗi chiều) giúp giảm dung lượng lưu trữ trên đĩa và trong bộ nhớ từ **3× đến 4×** (trong lab giảm từ ~2.0 MB xuống ~0.5 MB). Băng thông I/O và chi phí bộ nhớ cache khi quét vector giảm tương ứng.
+# - **Đánh đổi về chất lượng**: Do biểu diễn số học bị làm tròn vào lưới 256 giá trị rời rạc (`[-127, 127]`), các tích vô hướng và độ tương đồng Cosine bị sai số lượng tử hóa nhẹ. Điều này khiến thứ tự sắp xếp của các document có độ tương đồng sát nút nhau bị thay đổi, dẫn đến chỉ số `recall@10` theo ID chính xác giảm xuống (~0.890 - 0.900).
+#
+# ### 2. Recall theo doc ID khác Topic Fidelity thế nào?
+# - **Recall@10 theo doc ID (Exact-ID Recall)**:
+#   - So sánh đối đầu nghiêm ngặt giữa tập 10 doc ID trả về bởi `int8` so với tập 10 doc ID của `float32`. Nếu vị trí thứ 10 bị thay bằng một tài liệu khác thì dù tài liệu đó có cùng nội dung hay mức độ liên quan tương đương, nó vẫn bị tính là 1 lần trượt (miss). Thước đo này quá khắt khe đối với các tác vụ tìm kiếm ngữ nghĩa.
+# - **Topic Fidelity (Độ trung thực về chủ đề)**:
+#   - Đo lường tỷ lệ các tài liệu trong top-10 có **cùng nhãn chủ đề (topic)** với tài liệu truy vấn ban đầu.
+#   - Kết quả trong lab cho thấy Topic Fidelity đạt tới **~0.97 - 0.99 (≥ 0.95)**. Điều này chứng minh rằng hầu hết các "lỗi trượt" của int8 thực chất chỉ là sự hoán đổi giữa các tài liệu lân cận có mức độ liên quan tương đương trong cùng một cụm chủ đề. Đối với các ứng dụng RAG (Retrieval-Augmented Generation), mô hình LLM vẫn nhận được đúng ngữ cảnh chủ đề, do đó chất lượng trả lời không hề suy giảm.
+#
+# ### 3. External Vector Index cần nhận loại sự kiện nào để chấm dứt việc trả về dữ liệu đã xóa?
+# - External Index (Pinecone, Qdrant, Milvus...) bắt buộc phải nhận và xử lý **sự kiện XÓA (DELETE / Tombstone events)** đồng bộ từ Lakehouse.
+# - Trong thực tế, các pipeline đồng bộ thường được thiết kế theo dạng định kỳ ghi đè hoặc upsert các bản ghi mới/thay đổi (`INSERT`/`UPDATE`), nhưng lại **quên mất việc đồng bộ các bản ghi đã bị xóa**. Khi một người dùng yêu cầu xóa dữ liệu cá nhân theo quyền được lãng quên (Right to Erasure / GDPR / Nghị định 13), dữ liệu đã biến mất khỏi Lakehouse (0 hits) nhưng vẫn tồn tại vĩnh viễn trong external index (> 0 hits), gây ra vi phạm bảo mật và pháp lý nghiêm trọng.
+# - Để khắc phục, Lakehouse cần kích hoạt **Change Data Feed (CDF)**. External index phải đăng ký làm consumer đọc CDF, nhận các bản ghi có `_change_type = 'delete'` chứa danh sách `doc_id` cần xóa để lập tức trục xuất (evict) chúng khỏi index.
+
+# %% [markdown]
 # ## ✅ NB7 pass criteria
 #
 # | Check | Target |

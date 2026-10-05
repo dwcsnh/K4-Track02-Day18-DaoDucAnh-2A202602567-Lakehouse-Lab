@@ -1,0 +1,24 @@
+# Thông Tin Bài Nộp — Lakehouse Lab (K4-Track02-Day18)
+
+- **Họ và tên:** Đào Đức Anh
+- **Mã số sinh viên (MSSV):** 2A202602567
+- **Tài khoản GitHub:** dwcsnh
+- **Tên Repository bài nộp:** `K4-Track02-Day18-DaoDucAnh-2A202602567-Lakehouse-Lab`
+- **Mã bài lab:** K4-Track02-Day18
+- **Đường chạy thực thi (Execution Path):** Lightweight Path (Python Native APIs: `deltalake` (delta-rs), `pyiceberg`, `duckdb`, `polars`; Không dùng JVM / Docker Spark).
+- **Phiên bản Python:** Python 3.12.3
+- **Hệ điều hành:** Linux Ubuntu 24.04.1 LTS (x86_64, kernel 7.0.0-34-generic)
+- **Các thư viện chính:**
+  - `deltalake`: 1.6.6
+  - `pyiceberg`: 0.9.1
+  - `duckdb`: 1.3.x
+  - `polars`: 1.3.x
+  - `pyarrow`: 20.0.0
+- **Kết quả kiểm tra Reproducibility:**
+  - `make test`: PASS 24/24 unit tests.
+  - `make run-all`: PASS 8/8 notebooks headless.
+  - 8 notebooks đã thực thi đầy đủ và lưu trữ output trong `submission/notebooks/`.
+  - Đầy đủ 8 ảnh kết quả chính trong `submission/screenshots/`.
+  - Báo cáo phản tỉnh kiến trúc trong `submission/REFLECTION.md`.
+  - Khai báo phạm vi sử dụng AI trong `submission/AI_USAGE.md`.
+  - Tài liệu thiết kế kiến trúc Bonus trong `submission/bonus/ARCHITECTURE.md`.

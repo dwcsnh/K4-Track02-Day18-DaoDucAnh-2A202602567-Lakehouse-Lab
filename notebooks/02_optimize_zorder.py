@@ -157,6 +157,29 @@ print(
 )
 
 # %% [markdown]
+# ## 6. Trả lời câu hỏi & Giải thích kết quả (Challenge 3.2)
+#
+# ### 1. Compaction và Z-order tác động khác nhau thế nào?
+# - **Compaction (`dt.optimize.compact()`)**:
+#   - *Mục tiêu*: Giải quyết vấn đề "Small-File Problem". Gom hàng trăm file nhỏ (200 files sinh ra từ các micro-batches) thành các file có kích thước lớn hơn (~256 KB theo `TARGET_SIZE`).
+#   - *Tác động*: Giảm đáng kể tổng số file (`files_before = 200` giảm xuống `files_after`), giảm số lượng request I/O metadata và chi phí `GET` API trên Object Storage. Tuy nhiên, Compaction **không sắp xếp lại thứ tự dữ liệu theo các cột**, do đó dải giá trị `[min, max]` của `user_id` trong từng file vẫn bị phân tán và chồng lấn lên nhau trên hầu hết các file.
+# - **Z-Order (`dt.optimize.z_order(["user_id"])`)**:
+#   - *Mục tiêu*: Phân cụm dữ liệu đa chiều (multidimensional clustering) dọc theo đường cong Morton/Z-order.
+#   - *Tác động*: Sắp xếp lại các dòng dữ liệu để các giá trị `user_id` gần nhau được gom chặt vào cùng một file vật lý. Kết quả là dải `[min, max]` của `user_id` ở mỗi file trở nên rất hẹp và tách biệt. Khi thực hiện point query (`WHERE user_id = 4242`), Delta Lake tận dụng min/max stats trong transaction log để **loại bỏ (skip/prune) phần lớn các file**, chỉ cần đọc duy nhất 1 file chứa target user (đạt Files-pruned ratio ≥ 10×).
+#
+# ### 2. Vì sao gộp thành một file lớn có thể làm khó quan sát file pruning?
+# - Cơ chế Data Skipping / File Pruning trong Lakehouse hoạt động ở **cấp độ file (file-level)**: query planner đọc min/max stats của từng file trong transaction log để quyết định nạp hay bỏ qua file đó.
+# - Nếu ta gộp toàn bộ bảng vào đúng **1 file duy nhất** (`files_after = 1`), dải `[min, max]` của file đó sẽ bao trùm toàn bộ dải giá trị của bảng (từ 1 đến 100,000). Khi truy vấn bất kỳ `user_id` nào, giá trị đó đều rơi vào phạm vi của file duy nhất này.
+# - Hệ quả là engine bắt buộc phải đọc file đó, tỷ lệ loại bỏ file là 0% (không thể skip file nào). Vì vậy, cần giữ kích thước file mục tiêu phù hợp (`TARGET_SIZE = 256 KB` thay vì hàng chục MB) để duy trì một số lượng file nhất định (~30-50 files), giúp minh chứng rõ nét khả năng pruning của Z-order.
+#
+# ### 3. Vì sao thời gian benchmark biến động giữa các máy?
+# - Thời gian đo thực tế (Wall-clock Speedup) trên môi trường máy tính cá nhân/laptop có độ nhiễu cao vì:
+#   1. *OS File System Page Cache*: Các file vừa được ghi có thể vẫn nằm sẵn trên RAM, khiến các lần đọc kế tiếp nhanh hơn đột biến mà không phản ánh đúng chi phí I/O vật lý.
+#   2. *Tốc độ SSD / NVMe & Bus I/O*: Sự khác biệt về phần cứng, bộ điều khiển SSD và thuật toán đọc trước (read-ahead).
+#   3. *Tiến trình nền hệ điều hành*: Các tác vụ chạy ngầm trên CPU làm dao động thời gian đo mili-giây.
+# - Do đó, chỉ số **Files-pruned ratio (tỷ lệ file được prune)** là thước đo tất định (deterministic), không phụ thuộc vào phần cứng và phản ánh trung thực bản chất thuật toán Z-order.
+
+# %% [markdown]
 # ## ✅ Deliverable check
 # - [ ] Speedup ≥ 3× **or** files-pruned ratio ≥ 10× (slide §6 allows either)
 # - [ ] File count dropped substantially after compact()

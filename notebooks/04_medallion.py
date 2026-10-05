@@ -150,8 +150,49 @@ assert n_dates >= 7, (
 )
 
 # %% [markdown]
+# ## 5. Trả lời câu hỏi & Giải thích kết quả (Challenge 3.4)
+#
+# ### 1. Dedup ở Silver giải quyết vấn đề nào?
+# - Trong kiến trúc dữ liệu thực tế (đặc biệt là LLM observability, event streaming từ Kafka/Kinesis), các sự kiện được gửi theo cơ chế **at-least-once delivery**. Do mạng chập chờn, timeout, hoặc client retry, cùng một `request_id` thường xuyên bị gửi nhiều lần vào tầng Bronze (trong dữ liệu lab: Bronze có 200,000 dòng nhưng chỉ có ~190,052 unique `request_id`, tức ~9,948 bản ghi trùng lặp).
+# - Việc khử trùng lặp (deduplication) bằng cửa sổ `ROW_NUMBER() OVER (PARTITION BY request_id ORDER BY ts)` tại tầng Silver giúp loại bỏ hoàn toàn các bản ghi trùng lặp, đảm bảo mỗi yêu cầu suy luận chỉ được tính duy nhất một lần. Nếu không dedup ở Silver, các tầng phân tích phía sau sẽ tính sai lệch nghiêm trọng: thổi phồng số lượng request, tính sai tổng token tiêu thụ, phóng đại chi phí hóa đơn và sai lệch phân phối latency.
+#
+# ### 2. Vì sao dashboard đọc Gold thay vì đọc thẳng Silver hay Bronze?
+# 1. **Hiệu năng và độ trễ truy vấn (Query Latency)**: Bảng Gold là tập hợp các chỉ số đã được tiền tổng hợp (pre-aggregated) theo chiều phân tích nghiệp vụ (`date`, `model`). Dung lượng bảng Gold chỉ có 21 dòng (7 ngày × 3 model) so với hàng trăm ngàn dòng ở Silver và Bronze. Truy vấn dashboard trên Gold phản hồi tức thì (< 5ms) thay vì phải scan và tính toán lại từ đầu hàng triệu dòng.
+# 2. **Tiết kiệm tài nguyên và chi phí FinOps**: Việc hàng chục người dùng hoặc ứng dụng BI liên tục refresh dashboard sẽ gây lãng phí CPU/RAM khổng lồ nếu mỗi lần xem lại phải parse JSON và chạy tính quantile trên hàng trăm nghìn dòng. Bảng Gold tính toán 1 lần duy nhất trong pipeline định kỳ.
+# 3. **Chuẩn hóa logic nghiệp vụ (Single Source of Truth)**: Định nghĩa về tỷ lệ lỗi (`error_rate`), phân vị trễ (`p50`, `p95`), công thức tính chi phí token được tập trung hóa tại pipeline tạo Gold, tránh tình trạng mỗi dashboard viết một công thức SQL khác nhau gây mâu thuẫn số liệu.
+# 4. **Tối ưu hóa layout**: Bảng Gold được tối ưu hóa chuyên biệt cho dashboard (ví dụ: partition theo `date`, Z-order theo `model`) để phục vụ các bộ lọc phổ biến của báo cáo.
+#
+# ### 3. Cách tính error rate và chi phí trong query có phù hợp với dữ liệu đầu vào không?
+# - **Về Error Rate**:
+#   - Công thức: `AVG(CASE WHEN s.status <> 'ok' THEN 1.0 ELSE 0.0 END)`.
+#   - Phù hợp hoàn hảo vì trường `status` nhận giá trị `'ok'` khi thành công và các mã lỗi (như `'rate_limit'`, `'timeout'`, `'server_error'`) khi thất bại. Giá trị trung bình của biến chỉ thị 0/1 này trả về đúng tỷ lệ lỗi xác suất trong đoạn `[0, 1]`.
+# - **Về Chi phí (cost_usd)**:
+#   - Công thức: `(SUM(prompt_tokens) * c_in / 1e6) + (SUM(completion_tokens) * c_out / 1e6)` với bảng giá tương ứng cho từng model.
+#   - Phù hợp với mô hình kinh doanh và cách tính cước của các API LLM hiện nay (Anthropic, OpenAI): giá được tính riêng cho input token và output token theo đơn vị triệu tokens (per 1M tokens).
+
+# %% [markdown]
 # ## ✅ Deliverable check
 # - [ ] All three tables exist under `_lakehouse/{bronze,silver,gold}/`
 # - [ ] Silver has fewer rows than Bronze (dedup worked)
 # - [ ] Gold spans ≥ 7 dates × 3 models (slide §8 medallion contract)
 # - [ ] Cost & error_rate columns populated and non-zero
+# - [ ] p50 <= p95, cost_usd > 0, error_rate in [0, 1] across all Gold rows
+
+# %%
+p50_le_p95 = (gold_df["p50_latency_ms"] <= gold_df["p95_latency_ms"]).all()
+cost_positive = (gold_df["cost_usd"] > 0).all()
+error_rate_valid = ((gold_df["error_rate"] >= 0.0) & (gold_df["error_rate"] <= 1.0)).all()
+
+checks = {
+    "all 3 tables exist on storage": Path(BRONZE).exists() and Path(SILVER).exists() and Path(GOLD).exists(),
+    "silver dedup dropped rows":     silver_n < bronze_n,
+    "gold spans ≥ 7 dates":          n_dates >= 7,
+    "gold covers 3 models":          n_models == 3,
+    "gold p50 <= p95 latency":       bool(p50_le_p95),
+    "gold cost_usd strictly > 0":    bool(cost_positive),
+    "gold error_rate in [0, 1]":     bool(error_rate_valid),
+}
+for k, v in checks.items():
+    print(f"  [{'PASS' if v else 'FAIL'}] {k}")
+assert all(checks.values()), "NB4 incomplete — see FAIL rows above"
+print("\nNB4 complete.")

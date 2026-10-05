@@ -412,6 +412,23 @@ print("it is driven by FILE COUNT, not data volume. Fixing your writer's")
 print("trigger interval is cheaper than paying someone to clean up after it.")
 
 # %% [markdown]
+# ## 7. Trả lời câu hỏi & Giải thích kết quả (Challenge 3.6)
+#
+# ### 1. Vì sao file orphan chưa từng commit có thể không được Delta vacuum dọn?
+# - Lệnh `vacuum()` trong delta-rs hoạt động dựa trên **Transaction Log**: nó đọc lịch sử các commit để tìm những file đã bị tombstone (thông qua action `remove`) có tuổi thọ vượt quá ngưỡng retention quy định để xóa.
+# - Những file "orphan" sinh ra khi một tiến trình ghi bị crash giữa chừng (uncommitted crash writer) được ghi xuống đĩa nhưng **chưa bao giờ hoàn tất giao dịch commit vào transaction log**. Do đó, transaction log hoàn toàn không có bất kỳ thông tin nào về sự tồn tại của các file này, khiến `vacuum()` mặc định bỏ sót chúng.
+# - Để dọn dẹp các orphan file này, hệ thống bắt buộc phải thực hiện thuật toán **Directory Sweep** (lấy hiệu tập hợp giữa danh sách file thực tế trên storage và danh sách file đang được quản lý trong transaction log, kèm theo age guard an toàn để không xóa nhầm file của writer đang ghi dở).
+#
+# ### 2. Vì sao giảm snapshot trong đường PyIceberg này chưa đồng nghĩa file vật lý đã bị xóa?
+# - Trong kiến trúc Iceberg, lệnh `expire_snapshots()` là một thao tác **chỉ cập nhật metadata (metadata-only)**. Nhiệm vụ của nó là loại bỏ các snapshot ID cũ ra khỏi danh sách snapshot hợp lệ trong file `metadata.json` mới, biến các manifest list và data file tương ứng thành trạng thái "unreferenced" (không còn được tham chiếu).
+# - Bản thân client PyIceberg không tự động kích hoạt tiến trình nền xóa vật lý (`unlink`) các file avro/parquet đó trên đĩa (khác với Spark Iceberg tích hợp thủ tục dọn dẹp). Do đó, dung lượng lưu trữ trên đĩa chưa hề giảm cho đến khi ta chạy tiếp **Job 4 (Orphan Removal / Manifest Sweep)** để xóa sạch các manifest list bị cô lập (`snap-*.avro`). Đây là lý do nhiều đội ngũ thắc mắc vì sao họ expire snapshot liên tục nhưng hóa đơn S3 không giảm.
+#
+# ### 3. Khoảng thời gian lưu trữ (Retention) ảnh hưởng reader cũ thế nào?
+# - Ngưỡng `retention` (ví dụ `retention_hours=168` tương đương 7 ngày) là khoảng đệm thời gian an toàn cho phép người dùng truy vấn Time Travel về quá khứ và đảm bảo các reader đang chạy không bị gián đoạn.
+# - Nếu đặt retention quá ngắn (hoặc = 0 như trong kịch bản mô phỏng của lab để quan sát việc thu hồi dung lượng ngay lập tức), các file của snapshot cũ sẽ bị xóa vật lý ngay.
+# - Nếu một **long-running analytical query** hoặc một streaming reader đang đọc bảng dựa trên snapshot cũ đó, khi nó cần mở tiếp các file parquet tiếp theo thì file đã biến mất khỏi storage, dẫn đến lỗi nghiêm trọng `FileNotFoundException` và làm sập truy vấn giữa chừng. Vì vậy trong môi trường production, retention luôn phải được cấu hình lớn hơn thời gian tối đa của query dài nhất (thường là 7 đến 30 ngày).
+
+# %% [markdown]
 # ## ✅ NB6 pass criteria
 #
 # | Check | Target |

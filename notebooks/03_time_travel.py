@@ -115,6 +115,22 @@ for h in final_history:
 print(f"\nTotal versions: {len(final_history)}  (target ≥ 5)")
 
 # %% [markdown]
+# ## 6. Trả lời câu hỏi & Giải thích kết quả (Challenge 3.3)
+#
+# ### 1. Đọc version cũ (Time-Travel Query) khác RESTORE thế nào?
+# - **Đọc version cũ (`DeltaTable(path, version=N)` hoặc `AS OF`)**:
+#   - Là thao tác **chỉ đọc (read-only)**. Nó cho phép người dùng hoặc pipeline phân tích truy vấn dữ liệu tại một snapshot trong quá khứ mà **không làm thay đổi trạng thái hiện tại (HEAD)** của bảng.
+#   - Các tiến trình ghi (writer) khác vẫn tiếp tục ghi vào version mới nhất mà không bị ảnh hưởng.
+# - **RESTORE (`dt.restore(version=N)`)**:
+#   - Là thao tác **ghi có chủ đích (write transaction)** nhằm phục hồi/rollback toàn bộ trạng thái hoạt động của bảng về trạng thái của version quá khứ.
+#   - Sau lệnh RESTORE, trạng thái hiện tại của bảng (HEAD) sẽ phản ánh chính xác dữ liệu của version được khôi phục. Các truy vấn đọc bảng mặc định (không chỉ định version) sẽ thấy dữ liệu sạch đã được khôi phục, loại bỏ hoàn toàn các lỗi của version xấu (ở đây số dòng `score < 0` trở về 0).
+#
+# ### 2. Vì sao RESTORE tạo transaction mới thay vì xóa lịch sử?
+# - **Bảo đảm tính bất biến (Immutability)**: Nguyên tắc cốt lõi của Transaction Log trong Lakehouse là append-only. Việc sửa đổi hay xóa bỏ các commit JSON trước đó sẽ phá vỡ tính liên tục và tính toàn vẹn của chuỗi log.
+# - **Tính minh bạch và khả năng kiểm toán (Auditability / Lineage)**: Trong môi trường doanh nghiệp, mọi hành động thay đổi dữ liệu đều phải có dấu vết rõ ràng. Commit mới (`RESTORE`) ghi lại chính xác ai đã thực hiện rollback, vào lúc nào, từ version nào về version nào.
+# - **An toàn cho các tiến trình đang chạy (Concurrency & Readers safety)**: Nếu xóa lịch sử, các tiến trình concurrent đọc snapshot cũ (như pipeline huấn luyện ML hoặc báo cáo định kỳ đang chạy dở) sẽ bị lỗi sập (`FileNotFoundException`). Tạo commit mới cho phép các reader cũ tiếp tục đọc snapshot cũ một cách an toàn.
+
+# %% [markdown]
 # ## ✅ Deliverable check
 # - [ ] history() shows ≥ 5 versions (incl. RESTORE itself)
 # - [ ] MERGE 100K finished in < 60s (likely < 1s on lightweight path)

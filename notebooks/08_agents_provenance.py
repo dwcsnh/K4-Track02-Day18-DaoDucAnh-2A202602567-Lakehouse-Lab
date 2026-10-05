@@ -450,6 +450,27 @@ physical files. Retention and VACUUM must be considered separately (NB6),
 as must any copies or derived artifacts outside this table.""")
 
 # %% [markdown]
+# ## 4. Trả lời câu hỏi & Giải thích kết quả (Challenge 3.8)
+#
+# ### 1. Pin version giải quyết vấn đề gì trong huấn luyện Agent / ML?
+# - Trong các hệ thống Agent / Reinforcement Learning (RL), dữ liệu quỹ đạo (trajectories) liên tục được ghi dồn dập (append-heavy) vào bảng dữ liệu theo thời gian thực khi agent tương tác với môi trường.
+# - Nếu một tiến trình huấn luyện mô hình (training run) chỉ trỏ vào một đường dẫn bảng chung (`silver.agent_trajectories`), khi có ai đó hỏi *"Mô hình `vinuni-rag-v1` này đã được huấn luyện trên những dữ liệu cụ thể nào?"* thì sẽ hoàn toàn không thể trả lời được vì dữ liệu bảng tại thời điểm huấn luyện đã bị ghi đè/thêm mới.
+# - **Pin Version (`DeltaTable(path, version=N)`)** giải quyết triệt để vấn đề này: lưu chính xác số hiệu phiên bản commit (ví dụ: `table_version = 0`) vào siêu dữ liệu Model Card của lần chạy training. Khi cần kiểm toán hoặc tái hiện kết quả (reproducibility) sau nhiều tháng, ta có thể time-travel về đúng version đó và nhận được chính xác 100% số lượng bước và nội dung mà mô hình đã thấy khi huấn luyện, đáp ứng đầy đủ yêu cầu quản trị dữ liệu (như EU AI Act Article 10 & Annex IV).
+#
+# ### 2. Vì sao xóa ở version hiện tại chưa xóa bản cũ trong Lakehouse?
+# - Delta Lake hoạt động theo mô hình kiểm soát tương tranh đa phiên bản (MVCC - Multi-Version Concurrency Control) và lưu trữ bất biến (immutable data files).
+# - Khi chạy lệnh `dt.delete(f"subject_id = '{SUBJECT}'")`, Delta Lake tạo ra một **snapshot mới (version kế tiếp)**: nó ghi các file Parquet mới đã loại bỏ các dòng của subject đó và ghi nhận action `remove` đối với các file Parquet cũ trong transaction log.
+# - Tuy nhiên, các file Parquet cũ vẫn tồn tại vật lý trên đĩa và các commit log cũ vẫn trỏ đến chúng để phục vụ tính năng Time Travel. Do đó, nếu ai đó truy vấn lại version cũ, dữ liệu đã bị xóa vẫn xuất hiện.
+# - Để xóa triệt để về mặt vật lý (Right to Erasure compliance), cần phải kết hợp quy trình **Snapshot Expiry** và **VACUUM** với ngưỡng retention phù hợp (như đã thực hiện ở NB6) để thu hồi và xóa vĩnh viễn các file vật lý chứa dữ liệu cũ.
+#
+# ### 3. Những điểm nào khiến mô phỏng MCP trong notebook chưa phù hợp làm cơ chế kiểm soát Production?
+# Bản mô phỏng MCP trong notebook chỉ nhằm mục đích minh họa kiến trúc hợp đồng dữ liệu offline và có những giới hạn lớn so với một hệ thống Production:
+# 1. **Bảo mật và Xác thực (Authentication & Authorization)**: Cờ xác nhận `_meta={"confirmed": True}` do chính caller (bên gọi) tự truyền vào payload request in-process. Trong production, đây không phải là một ranh giới bảo mật thực sự vì một AI agent rogue hoàn toàn có thể tự đính kèm cờ này để vượt qua bước kiểm duyệt. Production đòi hỏi một Authorization Gateway độc lập với chữ ký số người dùng thực (Human-in-the-loop qua OAuth/mTLS).
+# 2. **Bộ nhớ Cache cục bộ (In-Memory Single-Process Cache)**: Cache TTL cho `list_tables` được lưu trong dictionary bộ nhớ của tiến trình Python hiện tại. Trong production phân tán với nhiều replica gateway nằm sau Load Balancer, cache cần được phân tán (như Redis) hoặc dựa trên cache-control headers chuẩn của giao thức MCP.
+# 3. **Quản lý Task giả lập (Simulated Task Polling)**: Thao tác `submit_scan` và `tasks_get` chỉ là cơ chế sleep/timer in-memory giả lập độ trễ. Trong production, tác vụ quét dài phải giao tiếp với các hệ thống điều phối phân tán thực tế (như Apache Spark, Trino, Celery/Temporal) với persistent state machine và cơ chế xử lý lỗi/hủy task.
+# 4. **Phân loại bản quyền minh họa (Illustrative Provenance Mapping)**: Bảng quy tắc phân loại 4 bucket trong lab mang tính giả định cho bài thực hành; việc gán giấy phép `cc-by-4.0` vào nhóm `public_domain` hay coi `user-owned` + consent là đủ không phản ánh quy định pháp lý thực tế (CC-BY đòi hỏi ghi công, quyền sở hữu dữ liệu cá nhân có nhiều ràng buộc pháp lý cụ thể).
+
+# %% [markdown]
 # ## ✅ NB8 pass criteria
 #
 # | Check | Target |
